@@ -165,7 +165,12 @@ export async function POST(req: Request) {
     if (!selectedTimeOfDay) return NextResponse.json({ error: "Please select time of day." }, { status: 400 });
 
     const geo = await geocodeCity(city);
-    if (!geo) return NextResponse.json({ error: `Sorry, we couldn't find "${city}". Try a nearby city name.` }, { status: 404 });
+    if (!geo) {
+      return NextResponse.json(
+        { error: `We couldn’t find “${city}”. Try a nearby city or double-check the spelling.` },
+        { status: 404 },
+      );
+    }
 
     const forecast = await fetchHourlyForecast(geo.latitude, geo.longitude);
 
@@ -214,7 +219,10 @@ export async function POST(req: Request) {
     return NextResponse.json(response);
   } catch {
     return NextResponse.json(
-      { error: "Sorry—something went wrong while generating your recommendation. Please try again." },
+      {
+        error:
+          "Something went wrong while talking to the weather service. Please try again in a moment or adjust your inputs.",
+      },
       { status: 500 },
     );
   }

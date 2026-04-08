@@ -55,6 +55,59 @@ function timeOfDayLabel(t: TimeOfDay) {
   return "Evening";
 }
 
+type VerdictKind = "good" | "okay" | "not";
+
+function getVerdictAndRisk(option: OptionId, weather: Weather) {
+  const { temperature, rainChance, wind } = weather;
+
+  // We intentionally derive the UI verdict from the returned values so the badge matches the recommendation.
+  let verdict: VerdictKind;
+
+  if (option === "running") {
+    const good = temperature >= 8 && temperature <= 22 && rainChance < 30 && wind < 20;
+    if (good) verdict = "good";
+    else if (rainChance < 50 && wind < 30 && temperature >= 5 && temperature <= 26) verdict = "okay";
+    else verdict = "not";
+  } else if (option === "motorbike") {
+    const notIdeal = rainChance > 40 || wind > 25;
+    if (notIdeal) verdict = "not";
+    else if (rainChance > 25 || wind > 15) verdict = "okay";
+    else verdict = "good";
+  } else if (option === "walk") {
+    const good = rainChance < 40 && temperature > 5;
+    if (good) verdict = "good";
+    else if (rainChance < 55 && temperature > 0) verdict = "okay";
+    else verdict = "not";
+  } else {
+    // wear
+    const tooWetOrWindy = rainChance > 70 || wind > 35;
+    const moderate = rainChance > 40 || wind > 20;
+    if (tooWetOrWindy) verdict = "not";
+    else if (moderate) verdict = "okay";
+    else verdict = "good";
+  }
+
+  const verdictLabel =
+    verdict === "good" ? "Good choice" : verdict === "okay" ? "Okay, but be prepared" : "Not recommended";
+  const riskLabel = verdict === "good" ? "Low risk" : verdict === "okay" ? "Moderate risk" : "High risk";
+
+  const badgeClasses =
+    verdict === "good"
+      ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+      : verdict === "okay"
+        ? "border-amber-400 bg-amber-50 text-amber-900"
+        : "border-rose-400 bg-rose-50 text-rose-900";
+
+  const riskClasses =
+    verdict === "good"
+      ? "text-emerald-800 bg-emerald-50 border-emerald-200"
+      : verdict === "okay"
+        ? "text-amber-800 bg-amber-50 border-amber-200"
+        : "text-rose-800 bg-rose-50 border-rose-200";
+
+  return { verdict, verdictLabel, riskLabel, badgeClasses, riskClasses };
+}
+
 export default function Home() {
   const [city, setCity] = useState("");
   const [selectedOption, setSelectedOption] = useState<OptionId | null>(null);
@@ -83,10 +136,10 @@ export default function Home() {
     const cityValue = city.trim();
 
     const nextErrors: FieldErrors = {};
-    if (!cityValue) nextErrors.city = "Please enter a city";
-    if (!selectedOption) nextErrors.option = "Please select an option";
-    if (!selectedDate.trim()) nextErrors.date = "Please select a date";
-    if (!selectedTimeOfDay) nextErrors.timeOfDay = "Please select time of day";
+    if (!cityValue) nextErrors.city = "Add a city so we know where to check.";
+    if (!selectedOption) nextErrors.option = "Choose what you’re planning to do.";
+    if (!selectedDate.trim()) nextErrors.date = "Pick a day you care about.";
+    if (!selectedTimeOfDay) nextErrors.timeOfDay = "Select the part of the day.";
 
     setFieldErrors(nextErrors);
 
@@ -152,7 +205,7 @@ export default function Home() {
           <div className="absolute -bottom-24 right-[-120px] h-[420px] w-[420px] rounded-full bg-gradient-to-tr from-indigo-200 via-fuchsia-200 to-rose-200 blur-3xl opacity-50" />
         </div>
 
-        <div className="mx-auto max-w-3xl px-6 py-16 sm:py-20">
+        <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6 sm:py-20">
           <header className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-white shadow-sm">
@@ -265,7 +318,7 @@ export default function Home() {
                   disabled={loading}
                   className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-zinc-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 >
-                  {loading ? "Loading..." : "Get recommendation"}
+                  {loading ? "Getting your recommendation…" : "Get recommendation"}
                 </button>
               </div>
 
@@ -313,17 +366,19 @@ export default function Home() {
             <section
               aria-live="polite"
               ref={resultRef}
-              className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+              className="mt-8 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-sm font-semibold text-zinc-900">Result</h2>
                   <p className="mt-1 text-sm text-zinc-600">
-                    {result || apiError
-                      ? "Here’s your weather-based recommendation."
-                      : "Recommendations will show here after you click "}
-                    {!result && !apiError ? <span className="font-medium">Get recommendation</span> : null}
-                    {!result && !apiError ? "." : null}
+                    {loading
+                      ? "We’re checking the forecast and preparing your recommendation."
+                      : result || apiError
+                        ? "Here’s your weather-based recommendation."
+                        : "Recommendations will appear here after you click "}
+                    {!result && !apiError && !loading ? <span className="font-medium">Get recommendation</span> : null}
+                    {!result && !apiError && !loading ? "." : null}
                   </p>
                 </div>
                 <div className="text-xs font-medium text-zinc-500">
@@ -332,13 +387,26 @@ export default function Home() {
               </div>
 
               {!result && !apiError ? (
-                <div className="mt-4 min-h-24 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-4" />
+                <div className="mt-4 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 h-7 w-7 rounded-full border border-zinc-200 bg-white text-center text-sm font-semibold text-zinc-500">
+                      ?
+                    </div>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="font-medium text-zinc-900">No recommendation yet</div>
+                      <p className="text-zinc-600">
+                        Add a city, pick what you’re planning to do, choose a day and time, then tap{" "}
+                        <span className="font-medium">Get recommendation</span>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               ) : apiError ? (
-                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 break-words">
                   {apiError}
                 </div>
               ) : result ? (
-                <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-4">
+                <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-4 sm:p-5">
                   <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-600">
                     <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
                       {result.resolvedCity ?? result.city}
@@ -351,10 +419,37 @@ export default function Home() {
                     </span>
                   </div>
 
-                  <div className="mt-3 flex flex-col gap-1">
-                    <div className="text-base font-semibold text-zinc-900">{result.recommendation.title}</div>
-                    <div className="text-sm text-zinc-600">{result.recommendation.summary}</div>
-                  </div>
+                  {(() => {
+                    const { verdictLabel, riskLabel, badgeClasses, riskClasses } = getVerdictAndRisk(
+                      result.selectedOption,
+                      result.weather,
+                    );
+
+                    return (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={[
+                              "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold",
+                              badgeClasses,
+                            ].join(" ")}
+                          >
+                            {verdictLabel}
+                          </span>
+                          <span
+                            className={[
+                              "inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold",
+                              riskClasses,
+                            ].join(" ")}
+                          >
+                            {riskLabel}
+                          </span>
+                        </div>
+
+                        <div className="text-sm text-zinc-700">{result.recommendation.summary}</div>
+                      </div>
+                    );
+                  })()}
 
                   <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-zinc-700">
                     {result.recommendation.reasons.map((r) => (
@@ -362,20 +457,23 @@ export default function Home() {
                     ))}
                   </ul>
 
-                  <div className="mt-5 rounded-lg bg-zinc-50 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-600">Weather details</div>
+                  <div className="mt-5 rounded-lg bg-zinc-50 p-3 sm:p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-600">Weather</div>
+                      <div className="text-xs font-medium text-zinc-500">Based on your selected time</div>
+                    </div>
                     <div className="mt-2 grid gap-2 text-sm text-zinc-700 sm:grid-cols-3">
                       <div className="rounded-lg bg-white p-3">
-                        <div className="text-xs text-zinc-500">Temp</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900">{result.weather.temperature}°C</div>
+                        <div className="text-[11px] text-zinc-500">Temp</div>
+                        <div className="mt-0.5 text-sm font-semibold text-zinc-900">{result.weather.temperature}°C</div>
                       </div>
                       <div className="rounded-lg bg-white p-3">
-                        <div className="text-xs text-zinc-500">Rain</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900">{result.weather.rainChance}%</div>
+                        <div className="text-[11px] text-zinc-500">Rain</div>
+                        <div className="mt-0.5 text-sm font-semibold text-zinc-900">{result.weather.rainChance}%</div>
                       </div>
                       <div className="rounded-lg bg-white p-3">
-                        <div className="text-xs text-zinc-500">Wind</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900">{result.weather.wind} km/h</div>
+                        <div className="text-[11px] text-zinc-500">Wind</div>
+                        <div className="mt-0.5 text-sm font-semibold text-zinc-900">{result.weather.wind} km/h</div>
                       </div>
                     </div>
                   </div>
@@ -385,18 +483,18 @@ export default function Home() {
                     {feedback ? (
                       <div className="mt-2 text-sm text-zinc-600">Thanks for your feedback</div>
                     ) : (
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                         <button
                           type="button"
                           onClick={() => setFeedback("yes")}
-                          className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+                          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 sm:w-auto"
                         >
                           Yes
                         </button>
                         <button
                           type="button"
                           onClick={() => setFeedback("no")}
-                          className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+                          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 sm:w-auto"
                         >
                           No
                         </button>
