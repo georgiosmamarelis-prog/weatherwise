@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 type OptionId = "running" | "wear" | "motorbike" | "walk";
 type TimeOfDay = "morning" | "noon" | "afternoon" | "evening" | "night";
+type Language = "en" | "el";
 
 type Weather = {
   temperature: number;
@@ -59,61 +60,131 @@ function selectClosestHourIndexOnDate(times: string[], date: string, targetHour:
   return bestIdx;
 }
 
-function buildRecommendation(option: OptionId, weather: Weather): Recommendation {
+function buildRecommendation(option: OptionId, weather: Weather, language: Language): Recommendation {
   const { temperature, rainChance, wind } = weather;
 
   if (option === "running") {
     const good = temperature >= 8 && temperature <= 22 && rainChance < 30 && wind < 20;
     return {
-      title: good ? "Good for running" : "Not ideal for running",
+      title: good
+        ? language === "el"
+          ? "Καλή επιλογή για τρέξιμο"
+          : "Good for running"
+        : language === "el"
+          ? "Δεν είναι ιδανικό για τρέξιμο"
+          : "Not ideal for running",
       summary: good
-        ? "Comfortable temperature with low rain and manageable wind."
-        : "Consider adjusting your plan based on rain or wind.",
-      reasons: [
-        `Temperature: ${temperature}°C (best between 8–22°C).`,
-        `Rain chance: ${rainChance}% (best under 30%).`,
-        `Wind: ${wind} km/h (best under 20 km/h).`,
-      ],
+        ? language === "el"
+          ? "Καλή θερμοκρασία, χαμηλή πιθανότητα βροχής και ήπιος άνεμος."
+          : "Comfortable temperature with low rain and manageable wind."
+        : language === "el"
+          ? "Ίσως χρειαστεί να προσαρμόσεις το πλάνο σου λόγω βροχής ή αέρα."
+          : "Consider adjusting your plan based on rain or wind.",
+      reasons:
+        language === "el"
+          ? [
+              `Θερμοκρασία: ${temperature}°C (ιδανικά 8–22°C).`,
+              `Πιθανότητα βροχής: ${rainChance}% (ιδανικά κάτω από 30%).`,
+              `Άνεμος: ${wind} km/h (ιδανικά κάτω από 20 km/h).`,
+            ]
+          : [
+              `Temperature: ${temperature}°C (best between 8–22°C).`,
+              `Rain chance: ${rainChance}% (best under 30%).`,
+              `Wind: ${wind} km/h (best under 20 km/h).`,
+            ],
     };
   }
 
   if (option === "motorbike") {
     const notIdeal = rainChance > 40 || wind > 25;
     return {
-      title: notIdeal ? "Not ideal for motorbike" : "Reasonable for motorbike",
-      summary: notIdeal ? "High rain chance or strong wind can reduce safety and comfort." : "Conditions look manageable—ride safe.",
-      reasons: [
-        `Rain chance: ${rainChance}% (not ideal over 40%).`,
-        `Wind: ${wind} km/h (not ideal over 25 km/h).`,
-        `Temperature: ${temperature}°C.`,
-      ],
+      title: notIdeal
+        ? language === "el"
+          ? "Δεν προτείνεται για μηχανάκι"
+          : "Not ideal for motorbike"
+        : language === "el"
+          ? "Λογικό για μηχανάκι"
+          : "Reasonable for motorbike",
+      summary: notIdeal
+        ? language === "el"
+          ? "Υψηλή πιθανότητα βροχής ή δυνατός άνεμος μειώνουν ασφάλεια και άνεση."
+          : "High rain chance or strong wind can reduce safety and comfort."
+        : language === "el"
+          ? "Οι συνθήκες φαίνονται διαχειρίσιμες—οδήγησε προσεκτικά."
+          : "Conditions look manageable—ride safe.",
+      reasons:
+        language === "el"
+          ? [
+              `Πιθανότητα βροχής: ${rainChance}% (δεν είναι ιδανικό πάνω από 40%).`,
+              `Άνεμος: ${wind} km/h (δεν είναι ιδανικό πάνω από 25 km/h).`,
+              `Θερμοκρασία: ${temperature}°C.`,
+            ]
+          : [
+              `Rain chance: ${rainChance}% (not ideal over 40%).`,
+              `Wind: ${wind} km/h (not ideal over 25 km/h).`,
+              `Temperature: ${temperature}°C.`,
+            ],
     };
   }
 
   if (option === "walk") {
     const good = rainChance < 40 && temperature > 5;
     return {
-      title: good ? "Good for a walk" : "Not ideal for a walk",
-      summary: good ? "Walk-friendly temperatures with a reasonable rain risk." : "You may want to shorten the walk or bring protection.",
-      reasons: [
-        `Rain chance: ${rainChance}% (good under 40%).`,
-        `Temperature: ${temperature}°C (good above 5°C).`,
-        `Wind: ${wind} km/h.`,
-      ],
+      title: good
+        ? language === "el"
+          ? "Καλή επιλογή για βόλτα"
+          : "Good for a walk"
+        : language === "el"
+          ? "Δεν είναι ιδανικό για βόλτα"
+          : "Not ideal for a walk",
+      summary: good
+        ? language === "el"
+          ? "Φιλική θερμοκρασία για βόλτα με λογικό ρίσκο βροχής."
+          : "Walk-friendly temperatures with a reasonable rain risk."
+        : language === "el"
+          ? "Ίσως χρειαστεί να μικρύνεις τη βόλτα ή να πάρεις προστασία."
+          : "You may want to shorten the walk or bring protection.",
+      reasons:
+        language === "el"
+          ? [
+              `Πιθανότητα βροχής: ${rainChance}% (καλό κάτω από 40%).`,
+              `Θερμοκρασία: ${temperature}°C (καλό πάνω από 5°C).`,
+              `Άνεμος: ${wind} km/h.`,
+            ]
+          : [
+              `Rain chance: ${rainChance}% (good under 40%).`,
+              `Temperature: ${temperature}°C (good above 5°C).`,
+              `Wind: ${wind} km/h.`,
+            ],
     };
   }
 
   // wear
   const base =
-    temperature < 10 ? "Wear a jacket." : temperature <= 20 ? "Wear a light jacket." : "A t-shirt or light layers should work.";
+    language === "el"
+      ? temperature < 10
+        ? "Φόρεσε μπουφάν."
+        : temperature <= 20
+          ? "Φόρεσε ελαφρύ μπουφάν."
+          : "Ένα t-shirt ή ελαφριές στρώσεις είναι ιδανικές."
+      : temperature < 10
+        ? "Wear a jacket."
+        : temperature <= 20
+          ? "Wear a light jacket."
+          : "A t-shirt or light layers should work.";
   const extras: string[] = [];
-  if (rainChance > 40) extras.push("Bring an umbrella or a waterproof layer.");
-  if (wind > 20) extras.push("Consider a windproof outer layer.");
+  if (rainChance > 40)
+    extras.push(language === "el" ? "Πάρε ομπρέλα ή αδιάβροχο." : "Bring an umbrella or a waterproof layer.");
+  if (wind > 20)
+    extras.push(language === "el" ? "Σκέψου ένα αντιανεμικό εξωτερικό layer." : "Consider a windproof outer layer.");
 
   return {
-    title: "What to wear",
+    title: language === "el" ? "Τι να φορέσω" : "What to wear",
     summary: [base, ...extras].join(" "),
-    reasons: [`Temperature: ${temperature}°C.`, `Rain chance: ${rainChance}%.`, `Wind: ${wind} km/h.`],
+    reasons:
+      language === "el"
+        ? [`Θερμοκρασία: ${temperature}°C.`, `Πιθανότητα βροχής: ${rainChance}%.`, `Άνεμος: ${wind} km/h.`]
+        : [`Temperature: ${temperature}°C.`, `Rain chance: ${rainChance}%.`, `Wind: ${wind} km/h.`],
   };
 }
 
@@ -149,27 +220,43 @@ async function fetchHourlyForecast(lat: number, lon: number) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
+      language?: Language;
       city?: string;
       selectedOption?: OptionId;
       selectedDate?: string;
       selectedTimeOfDay?: TimeOfDay;
     };
 
+    const language: Language = body.language === "en" ? "en" : "el";
     const city = (body.city ?? "").trim();
     const selectedOption = body.selectedOption;
     const selectedDate = (body.selectedDate ?? "").trim();
     const selectedTimeOfDay = body.selectedTimeOfDay;
 
-    if (!city) return NextResponse.json({ error: "Please enter a city." }, { status: 400 });
-    if (!selectedOption) return NextResponse.json({ error: "Please select an option." }, { status: 400 });
+    if (!city)
+      return NextResponse.json({ error: language === "el" ? "Γράψε μια πόλη." : "Please enter a city." }, { status: 400 });
+    if (!selectedOption)
+      return NextResponse.json({ error: language === "el" ? "Διάλεξε μια επιλογή." : "Please select an option." }, { status: 400 });
     if (!selectedDate || !isValidYyyyMmDd(selectedDate))
-      return NextResponse.json({ error: "Please select a date." }, { status: 400 });
-    if (!selectedTimeOfDay) return NextResponse.json({ error: "Please select time of day." }, { status: 400 });
+      return NextResponse.json(
+        { error: language === "el" ? "Διάλεξε ημερομηνία." : "Please select a date." },
+        { status: 400 },
+      );
+    if (!selectedTimeOfDay)
+      return NextResponse.json(
+        { error: language === "el" ? "Διάλεξε ώρα ημέρας." : "Please select time of day." },
+        { status: 400 },
+      );
 
     const geo = await geocodeCity(city);
     if (!geo) {
       return NextResponse.json(
-        { error: `We couldn’t find “${city}”. Try a nearby city or double-check the spelling.` },
+        {
+          error:
+            language === "el"
+              ? `Δεν βρήκαμε την πόλη “${city}”. Δοκίμασε μια κοντινή πόλη ή έλεγξε την ορθογραφία.`
+              : `We couldn’t find “${city}”. Try a nearby city or double-check the spelling.`,
+        },
         { status: 404 },
       );
     }
@@ -183,13 +270,19 @@ export async function POST(req: Request) {
     const winds: number[] = hourly?.windspeed_10m;
 
     if (!Array.isArray(times) || !Array.isArray(temps) || !Array.isArray(rains) || !Array.isArray(winds)) {
-      return NextResponse.json({ error: "Forecast data was unavailable for this location." }, { status: 502 });
+      return NextResponse.json(
+        { error: language === "el" ? "Δεν υπάρχουν διαθέσιμα δεδομένα πρόγνωσης για αυτή την τοποθεσία." : "Forecast data was unavailable for this location." },
+        { status: 502 },
+      );
     }
 
     const targetHour = timeOfDayToTargetHour(selectedTimeOfDay);
     const idx = selectClosestHourIndexOnDate(times, selectedDate, targetHour);
     if (idx < 0) {
-      return NextResponse.json({ error: "No hourly forecast was available for the selected date." }, { status: 404 });
+      return NextResponse.json(
+        { error: language === "el" ? "Δεν βρέθηκε ωριαία πρόγνωση για την επιλεγμένη ημερομηνία." : "No hourly forecast was available for the selected date." },
+        { status: 404 },
+      );
     }
 
     const temperature = Number(temps[idx]);
@@ -197,7 +290,10 @@ export async function POST(req: Request) {
     const wind = Number(winds[idx]);
 
     if ([temperature, rainChance, wind].some((n) => Number.isNaN(n))) {
-      return NextResponse.json({ error: "Forecast data was incomplete for the selected time." }, { status: 502 });
+      return NextResponse.json(
+        { error: language === "el" ? "Η πρόγνωση είναι ελλιπής για την επιλεγμένη ώρα." : "Forecast data was incomplete for the selected time." },
+        { status: 502 },
+      );
     }
 
     const weather: Weather = {
@@ -206,7 +302,7 @@ export async function POST(req: Request) {
       wind: Math.round(wind),
     };
 
-    const recommendation = buildRecommendation(selectedOption, weather);
+    const recommendation = buildRecommendation(selectedOption, weather, language);
 
     const response: RecommendResponse = {
       city,
