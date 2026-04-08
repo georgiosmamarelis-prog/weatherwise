@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 
 type OptionId = "running" | "wear" | "motorbike" | "walk";
-type TimeOfDay = "morning" | "afternoon" | "evening";
+type TimeOfDay = "morning" | "noon" | "afternoon" | "evening" | "night";
 
 type Weather = {
   temperature: number;
@@ -49,10 +49,29 @@ function formatDateForDisplay(yyyyMmDd: string) {
   return `${pad2(dd)}/${pad2(mm)}/${String(yyyy)}`;
 }
 
+function formatDateForInput(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getTodayYyyyMmDd() {
+  return formatDateForInput(new Date());
+}
+
+function getTomorrowYyyyMmDd() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return formatDateForInput(d);
+}
+
 function timeOfDayLabel(t: TimeOfDay) {
   if (t === "morning") return "Morning";
+  if (t === "noon") return "Noon";
   if (t === "afternoon") return "Afternoon";
-  return "Evening";
+  if (t === "evening") return "Evening";
+  return "Night";
 }
 
 type VerdictKind = "good" | "okay" | "not";
@@ -139,7 +158,7 @@ export default function Home() {
     if (!cityValue) nextErrors.city = "Add a city so we know where to check.";
     if (!selectedOption) nextErrors.option = "Choose what you’re planning to do.";
     if (!selectedDate.trim()) nextErrors.date = "Pick a day you care about.";
-    if (!selectedTimeOfDay) nextErrors.timeOfDay = "Select the part of the day.";
+    if (!selectedTimeOfDay) nextErrors.timeOfDay = "Select a time category.";
 
     setFieldErrors(nextErrors);
 
@@ -267,6 +286,44 @@ export default function Home() {
                       ].join(" ")}
                     />
                   </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(() => {
+                      const today = getTodayYyyyMmDd();
+                      const tomorrow = getTomorrowYyyyMmDd();
+                      const mkBtn = (label: "Today" | "Tomorrow", value: string) => {
+                        const active = selectedDate === value;
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => {
+                              setSelectedDate(value);
+                              if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined }));
+                            }}
+                            className={[
+                              "inline-flex h-9 items-center justify-center rounded-full border px-4 text-xs font-semibold shadow-sm transition-colors duration-200",
+                              "whitespace-nowrap",
+                              active
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-800 hover:bg-zinc-100",
+                            ].join(" ")}
+                            aria-pressed={active}
+                          >
+                            {label}
+                          </button>
+                        );
+                      };
+
+                      return (
+                        <>
+                          {mkBtn("Today", today)}
+                          {mkBtn("Tomorrow", tomorrow)}
+                        </>
+                      );
+                    })()}
+                  </div>
+
                   {selectedDate ? (
                     <div className="mt-2 text-xs text-zinc-600">Selected: {formatDateForDisplay(selectedDate)}</div>
                   ) : null}
@@ -281,7 +338,7 @@ export default function Home() {
                       fieldErrors.timeOfDay ? "ring-2 ring-rose-200" : "",
                     ].join(" ")}
                   >
-                    {(["morning", "afternoon", "evening"] as const).map((t) => {
+                    {(["morning", "noon", "afternoon", "evening", "night"] as const).map((t) => {
                       const active = selectedTimeOfDay === t;
                       return (
                         <button
@@ -292,7 +349,7 @@ export default function Home() {
                             if (fieldErrors.timeOfDay) setFieldErrors((prev) => ({ ...prev, timeOfDay: undefined }));
                           }}
                           className={[
-                            "inline-flex h-14 items-center justify-center rounded-full border px-5 text-sm font-semibold shadow-sm",
+                            "inline-flex h-14 items-center justify-center rounded-full border px-4 text-sm font-semibold shadow-sm sm:px-5",
                             "whitespace-nowrap transition-colors duration-200",
                             active
                               ? "border-zinc-900 bg-zinc-900 text-white"

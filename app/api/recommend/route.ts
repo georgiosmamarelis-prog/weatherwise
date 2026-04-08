@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 type OptionId = "running" | "wear" | "motorbike" | "walk";
-type TimeOfDay = "morning" | "afternoon" | "evening";
+type TimeOfDay = "morning" | "noon" | "afternoon" | "evening" | "night";
 
 type Weather = {
   temperature: number;
@@ -27,8 +27,10 @@ type RecommendResponse = {
 
 function timeOfDayToTargetHour(timeOfDay: TimeOfDay) {
   if (timeOfDay === "morning") return 8;
-  if (timeOfDay === "afternoon") return 14;
-  return 19;
+  if (timeOfDay === "noon") return 12;
+  if (timeOfDay === "afternoon") return 15;
+  if (timeOfDay === "evening") return 18;
+  return 21;
 }
 
 function isValidYyyyMmDd(date: string) {
