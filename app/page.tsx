@@ -3,14 +3,18 @@
 import { track } from "@vercel/analytics";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type OptionId = "running" | "wear" | "motorbike" | "walk";
+type OptionId = "running" | "wear" | "motorbike" | "walk" | "cycling" | "beach";
 type TimeOfDay = "morning" | "noon" | "afternoon" | "evening" | "night";
 type Language = "en" | "el";
 
 type Weather = {
   temperature: number;
+  feelsLike: number;
   rainChance: number;
   wind: number;
+  weatherCode: number;
+  uvIndex: number;
+  visibility: number;
 };
 
 type Recommendation = {
@@ -27,6 +31,7 @@ type RecommendResponse = {
   selectedTimeOfDay: TimeOfDay;
   recommendation: Recommendation;
   weather: Weather;
+  conditionLabel: string;
 };
 
 type FieldErrors = {
@@ -36,14 +41,22 @@ type FieldErrors = {
   timeOfDay?: string;
 };
 
+const SCENARIO_EMOJI: Record<OptionId, string> = {
+  running: "🏃",
+  wear: "👕",
+  motorbike: "🛵",
+  walk: "🚶",
+  cycling: "🚴",
+  beach: "🏖️",
+};
+
 const translations = {
   en: {
     header: { brand: "WeatherWise", tagline: "Make the call. Dress right.", langEN: "EN", langEL: "EL" },
     hero: {
       title: "WeatherWise",
       subtitle: "Weather advice for real-life decisions",
-      description:
-        "Get quick weather-based recommendations for running, clothing, walking, or taking your motorbike.",
+      description: "Get quick weather-based recommendations for running, cycling, the beach, clothing, and more.",
     },
     inputs: {
       cityLabel: "City",
@@ -54,12 +67,15 @@ const translations = {
       quickTomorrow: "Tomorrow",
       timeOfDayLabel: "Time of day",
     },
+    quickStartLabel: "Try an example:",
     timeOfDay: { morning: "Morning", noon: "Noon", afternoon: "Afternoon", evening: "Evening", night: "Night" },
     scenarios: {
       running: { title: "Running", description: "Pace, layers, and rain/wind tips." },
       wear: { title: "What to wear", description: "Outfit suggestions for the day ahead." },
       motorbike: { title: "Motorbike", description: "Visibility, grip, and comfort guidance." },
       walk: { title: "Walk", description: "Umbrella and route-friendly advice." },
+      cycling: { title: "Cycling", description: "Wind, grip, and comfort for your ride." },
+      beach: { title: "Beach / Outdoors", description: "Sun, wind, and UV for your outdoor plans." },
     },
     actions: { getRecommendation: "Get recommendation", loading: "Getting your recommendation…" },
     validation: {
@@ -70,14 +86,14 @@ const translations = {
     },
     result: {
       title: "Result",
-      loading: "We’re checking the forecast and preparing your recommendation.",
-      ready: "Here’s your weather-based recommendation.",
+      loading: "We're checking the forecast and preparing your recommendation.",
+      ready: "Here's your weather-based recommendation.",
       emptyLead: "No recommendation yet",
-      emptyBody:
-        "Add a city, pick what you’re planning to do, choose a day and time, then tap Get recommendation.",
-      weather: "Weather",
+      emptyBody: "Add a city, pick what you're planning to do, choose a day and time, then tap Get recommendation.",
+      weather: "Weather snapshot",
       basedOnSelectedTime: "Based on your selected time",
       temp: "Temp",
+      feelsLike: "Feels like",
       rain: "Rain",
       wind: "Wind",
     },
@@ -93,7 +109,13 @@ const translations = {
       question: "Was this recommendation useful?",
       yes: "Yes",
       no: "No",
-      thanks: "Thanks for your feedback",
+      thanks: "Thanks for your feedback!",
+      share: "Share",
+      copied: "Copied!",
+      whyNot: "What went wrong?",
+      reasonWrongForecast: "Forecast seems wrong",
+      reasonNotHelpful: "Advice wasn't helpful",
+      reasonMissingScenario: "Missing my scenario",
     },
     errors: {
       network: "Network error. Please check your connection and try again.",
@@ -106,7 +128,7 @@ const translations = {
     hero: {
       title: "WeatherWise",
       subtitle: "Συμβουλές καιρού για πραγματικές αποφάσεις",
-      description: "Πάρε γρήγορες προτάσεις με βάση τον καιρό για τρέξιμο, ντύσιμο, βόλτα ή μηχανάκι.",
+      description: "Πάρε γρήγορες προτάσεις με βάση τον καιρό για τρέξιμο, ποδήλατο, παραλία, ντύσιμο και άλλα.",
     },
     inputs: {
       cityLabel: "Πόλη",
@@ -117,12 +139,15 @@ const translations = {
       quickTomorrow: "Αύριο",
       timeOfDayLabel: "Ώρα ημέρας",
     },
+    quickStartLabel: "Δοκίμασε ένα παράδειγμα:",
     timeOfDay: { morning: "Πρωί", noon: "Μεσημέρι", afternoon: "Απόγευμα", evening: "Βράδυ", night: "Νύχτα" },
     scenarios: {
       running: { title: "Τρέξιμο", description: "Ρυθμός, ρούχα και συμβουλές για βροχή/αέρα." },
       wear: { title: "Τι να φορέσω", description: "Προτάσεις ντυσίματος για την ημέρα." },
       motorbike: { title: "Μηχανάκι", description: "Ορατότητα, πρόσφυση και άνεση στη διαδρομή." },
       walk: { title: "Βόλτα", description: "Ομπρέλα και συμβουλές για πιο άνετη βόλτα." },
+      cycling: { title: "Ποδήλατο", description: "Άνεμος, πρόσφυση και άνεση για τη βόλτα σου." },
+      beach: { title: "Παραλία / Εξωτερικός χώρος", description: "Ήλιος, άνεμος και UV για τις εξωτερικές δραστηριότητές σου." },
     },
     actions: { getRecommendation: "Πάρε πρόταση", loading: "Υπολογίζουμε την πρόταση…" },
     validation: {
@@ -136,11 +161,11 @@ const translations = {
       loading: "Ελέγχουμε την πρόγνωση και ετοιμάζουμε την πρότασή σου.",
       ready: "Έτοιμη η πρότασή σου με βάση τον καιρό.",
       emptyLead: "Δεν υπάρχει πρόταση ακόμα",
-      emptyBody:
-        "Βάλε πόλη, διάλεξε τι θες να κάνεις, επέλεξε ημερομηνία και ώρα ημέρας και πάτησε Πάρε πρόταση.",
-      weather: "Καιρός",
+      emptyBody: "Βάλε πόλη, διάλεξε τι θες να κάνεις, επέλεξε ημερομηνία και ώρα ημέρας και πάτησε Πάρε πρόταση.",
+      weather: "Στιγμιότυπο καιρού",
       basedOnSelectedTime: "Με βάση την επιλεγμένη ώρα",
       temp: "Θερμ.",
+      feelsLike: "Αίσθηση",
       rain: "Βροχή",
       wind: "Άνεμος",
     },
@@ -156,7 +181,13 @@ const translations = {
       question: "Σου ήταν χρήσιμη η πρόταση;",
       yes: "Ναι",
       no: "Όχι",
-      thanks: "Ευχαριστούμε για το feedback",
+      thanks: "Ευχαριστούμε για το feedback!",
+      share: "Μοιράσου",
+      copied: "Αντιγράφηκε!",
+      whyNot: "Τι πήγε στραβά;",
+      reasonWrongForecast: "Η πρόγνωση φαίνεται λανθασμένη",
+      reasonNotHelpful: "Η συμβουλή δεν ήταν χρήσιμη",
+      reasonMissingScenario: "Λείπει η δραστηριότητά μου",
     },
     errors: {
       network: "Σφάλμα δικτύου. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.",
@@ -191,28 +222,57 @@ function getTomorrowYyyyMmDd() {
   return formatDateForInput(d);
 }
 
+function getMaxDateYyyyMmDd() {
+  const d = new Date();
+  d.setDate(d.getDate() + 16);
+  return formatDateForInput(d);
+}
+
+function getWeatherEmoji(temperature: number, rainChance: number, wind: number, weatherCode: number): string {
+  if (weatherCode >= 95) return "⛈️";
+  if (weatherCode >= 71 && weatherCode <= 77) return "🌨️";
+  if (rainChance >= 60) return "🌧️";
+  if (rainChance >= 30) return "🌦️";
+  if (wind >= 30) return "💨";
+  if (temperature >= 28) return "☀️";
+  if (temperature <= 0) return "🥶";
+  return "⛅";
+}
+
 type VerdictKind = "good" | "okay" | "not";
 
 function getVerdictAndRisk(option: OptionId, weather: Weather) {
-  const { temperature, rainChance, wind } = weather;
-
-  // We intentionally derive the UI verdict from the returned values so the badge matches the recommendation.
+  const { temperature, feelsLike, rainChance, wind, weatherCode } = weather;
+  const isThunderstorm = weatherCode >= 95;
   let verdict: VerdictKind;
 
   if (option === "running") {
-    const good = temperature >= 8 && temperature <= 22 && rainChance < 30 && wind < 20;
+    const good = temperature >= 8 && temperature <= 22 && rainChance < 30 && wind < 20 && !isThunderstorm;
     if (good) verdict = "good";
-    else if (rainChance < 50 && wind < 30 && temperature >= 5 && temperature <= 26) verdict = "okay";
+    else if (!isThunderstorm && rainChance < 50 && wind < 30 && temperature >= 5 && temperature <= 26) verdict = "okay";
     else verdict = "not";
   } else if (option === "motorbike") {
-    const notIdeal = rainChance > 40 || wind > 25;
-    if (notIdeal) verdict = "not";
+    const dangerous = isThunderstorm || wind > 40 || weather.visibility < 500;
+    const notIdeal = rainChance > 40 || wind > 25 || weather.visibility < 1000;
+    if (dangerous || notIdeal) verdict = "not";
     else if (rainChance > 25 || wind > 15) verdict = "okay";
     else verdict = "good";
   } else if (option === "walk") {
-    const good = rainChance < 40 && temperature > 5;
+    const good = rainChance < 40 && temperature > 5 && !isThunderstorm;
     if (good) verdict = "good";
-    else if (rainChance < 55 && temperature > 0) verdict = "okay";
+    else if (!isThunderstorm && rainChance < 55 && temperature > 0) verdict = "okay";
+    else verdict = "not";
+  } else if (option === "cycling") {
+    const ideal = temperature >= 10 && temperature <= 25 && feelsLike > 8 && rainChance < 25 && wind < 25 && !isThunderstorm;
+    const manageable = !isThunderstorm && rainChance < 45 && wind < 35 && temperature >= 8;
+    if (ideal) verdict = "good";
+    else if (manageable) verdict = "okay";
+    else verdict = "not";
+  } else if (option === "beach") {
+    const great = temperature > 24 && rainChance < 20 && wind < 20 && weatherCode <= 3;
+    const okay = temperature >= 20 && rainChance < 30 && wind < 30 && !isThunderstorm;
+    if (great) verdict = "good";
+    else if (okay) verdict = "okay";
     else verdict = "not";
   } else {
     // wear
@@ -251,6 +311,8 @@ export default function Home() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<"yes" | "no" | null>(null);
+  const [feedbackReason, setFeedbackReason] = useState<string | null>(null);
+  const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [slowLoading, setSlowLoading] = useState(false);
 
   const resultRef = useRef<HTMLElement | null>(null);
@@ -258,10 +320,24 @@ export default function Home() {
 
   const t = translations[language];
 
+  // Restore language + last city/option from localStorage on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("weatherwise_language");
-      if (saved === "en" || saved === "el") setLanguage(saved);
+      const savedLang = localStorage.getItem("weatherwise_language");
+      if (savedLang === "en" || savedLang === "el") setLanguage(savedLang);
+
+      const savedLast = localStorage.getItem("weatherwise_last");
+      if (savedLast) {
+        const { city: savedCity, selectedOption: savedOption } = JSON.parse(savedLast) as {
+          city?: string;
+          selectedOption?: string;
+        };
+        if (typeof savedCity === "string" && savedCity) setCity(savedCity);
+        const validOptions: OptionId[] = ["running", "wear", "motorbike", "walk", "cycling", "beach"];
+        if (savedOption && validOptions.includes(savedOption as OptionId)) {
+          setSelectedOption(savedOption as OptionId);
+        }
+      }
     } catch {
       // ignore
     }
@@ -291,8 +367,34 @@ export default function Home() {
         { id: "wear", ...t.scenarios.wear },
         { id: "motorbike", ...t.scenarios.motorbike },
         { id: "walk", ...t.scenarios.walk },
+        { id: "cycling", ...t.scenarios.cycling },
+        { id: "beach", ...t.scenarios.beach },
       ] satisfies Array<{ id: OptionId; title: string; description: string }>),
     [t],
+  );
+
+  const quickStartExamples = useMemo(
+    () => [
+      {
+        label: language === "el" ? "🏃 Τρέξιμο · Αθήνα" : "🏃 Running · Athens",
+        city: language === "el" ? "Αθήνα" : "Athens",
+        option: "running" as OptionId,
+        timeOfDay: "morning" as TimeOfDay,
+      },
+      {
+        label: language === "el" ? "👕 Ντύσιμο · Θεσσαλονίκη" : "👕 What to wear · Thessaloniki",
+        city: language === "el" ? "Θεσσαλονίκη" : "Thessaloniki",
+        option: "wear" as OptionId,
+        timeOfDay: "noon" as TimeOfDay,
+      },
+      {
+        label: language === "el" ? "🏖️ Παραλία · Ηράκλειο" : "🏖️ Beach · Heraklion",
+        city: language === "el" ? "Ηράκλειο" : "Heraklion",
+        option: "beach" as OptionId,
+        timeOfDay: "afternoon" as TimeOfDay,
+      },
+    ],
+    [language],
   );
 
   const selectedLabel = useMemo(
@@ -304,6 +406,21 @@ export default function Home() {
     requestAnimationFrame(() => {
       resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  }
+
+  async function onShare(res: RecommendResponse) {
+    const text = `${res.recommendation.title} — ${res.resolvedCity ?? res.city}, ${formatDateForDisplay(res.selectedDate)} (${t.timeOfDay[res.selectedTimeOfDay]}). ${res.recommendation.summary}`;
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: "WeatherWise", text, url: window.location.href });
+      } else {
+        await navigator.clipboard.writeText(text);
+        setShareState("copied");
+        setTimeout(() => setShareState("idle"), 2000);
+      }
+    } catch {
+      // user cancelled or clipboard unavailable
+    }
   }
 
   async function onGenerate() {
@@ -338,6 +455,8 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setFeedback(null);
+    setFeedbackReason(null);
+    setShareState("idle");
     setApiError(null);
 
     try {
@@ -367,7 +486,13 @@ export default function Home() {
         return;
       }
 
-      setResult(data as RecommendResponse);
+      const resultData = data as RecommendResponse;
+      setResult(resultData);
+      try {
+        localStorage.setItem("weatherwise_last", JSON.stringify({ city: cityValue, selectedOption: option }));
+      } catch {
+        // ignore
+      }
       track("recommendation_generated", { option, timeOfDay });
       setLoading(false);
       scrollToResultSoon();
@@ -383,21 +508,29 @@ export default function Home() {
     <main className="min-h-screen bg-white text-zinc-900">
       <div className="relative isolate overflow-hidden">
         <div className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute -top-24 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-gradient-to-tr from-sky-200 via-blue-200 to-emerald-200 blur-3xl opacity-60" />
-          <div className="absolute -bottom-24 right-[-120px] h-[420px] w-[420px] rounded-full bg-gradient-to-tr from-indigo-200 via-fuchsia-200 to-rose-200 blur-3xl opacity-50" />
+          <div className="absolute -top-24 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-gradient-to-tr from-sky-200 via-blue-200 to-emerald-200 blur-3xl opacity-80" />
+          <div className="absolute -bottom-24 right-[-120px] h-[420px] w-[420px] rounded-full bg-gradient-to-tr from-indigo-200 via-fuchsia-200 to-rose-200 blur-3xl opacity-60" />
         </div>
 
         <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6 sm:py-20">
           <header className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-white shadow-sm" role="img" aria-label="WeatherWise logo">
+              <div
+                className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-sm"
+                role="img"
+                aria-label="WeatherWise logo"
+              >
                 <span className="text-sm font-semibold">WW</span>
               </div>
               <span className="text-sm font-semibold tracking-tight">{t.header.brand}</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="hidden text-sm text-zinc-500 sm:block">{t.header.tagline}</div>
-              <div role="group" aria-label="Language selection" className="inline-flex rounded-full border border-zinc-200 bg-white/70 p-1 shadow-sm backdrop-blur">
+              <div
+                role="group"
+                aria-label="Language selection"
+                className="inline-flex rounded-full border border-zinc-200 bg-white/70 p-1 shadow-sm backdrop-blur"
+              >
                 <button
                   type="button"
                   onClick={() => setLanguage("en")}
@@ -429,11 +562,32 @@ export default function Home() {
           <section className="mt-12">
             <h1 className="text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">{t.hero.title}</h1>
             <p className="mt-3 text-lg font-medium text-zinc-700">{t.hero.subtitle}</p>
-            <p className="mt-4 text-base leading-7 text-zinc-600">
-              {t.hero.description}
-            </p>
+            <p className="mt-4 text-base leading-7 text-zinc-600">{t.hero.description}</p>
 
-            <div className="mt-8 rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5">
+            {/* Quick-start strip */}
+            <div className="mt-5">
+              <p className="text-xs font-medium text-zinc-500">{t.quickStartLabel}</p>
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                {quickStartExamples.map((ex) => (
+                  <button
+                    key={ex.label}
+                    type="button"
+                    onClick={() => {
+                      setCity(ex.city);
+                      setSelectedOption(ex.option);
+                      setSelectedDate(getTodayYyyyMmDd());
+                      setSelectedTimeOfDay(ex.timeOfDay);
+                      setFieldErrors({});
+                    }}
+                    className="inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-sky-200 bg-sky-50 px-4 text-xs font-semibold text-sky-800 transition-colors hover:bg-sky-100 whitespace-nowrap"
+                  >
+                    {ex.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5">
               <div className="grid gap-3 sm:grid-cols-12">
                 <div className="sm:col-span-6">
                   <label className="block text-sm font-medium text-zinc-800" htmlFor="city">
@@ -467,6 +621,8 @@ export default function Home() {
                       id="date"
                       type="date"
                       value={selectedDate}
+                      min={getTodayYyyyMmDd()}
+                      max={getMaxDateYyyyMmDd()}
                       onChange={(e) => {
                         setSelectedDate(e.target.value);
                         if (fieldErrors.date) setFieldErrors((prev) => ({ ...prev, date: undefined }));
@@ -482,7 +638,7 @@ export default function Home() {
                     {(() => {
                       const today = getTodayYyyyMmDd();
                       const tomorrow = getTomorrowYyyyMmDd();
-                        const mkBtn = (label: string, value: string) => {
+                      const mkBtn = (label: string, value: string) => {
                         const active = selectedDate === value;
                         return (
                           <button
@@ -561,18 +717,33 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mt-3">
+              <div className="mt-4">
                 <button
                   type="button"
                   onClick={onGenerate}
                   disabled={loading}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-zinc-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-5 text-sm font-semibold text-white shadow-md transition hover:from-sky-600 hover:to-blue-700 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {loading ? t.actions.loading : t.actions.getRecommendation}
+                  {loading ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 22 6.477 22 12h-4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      {t.actions.loading}
+                    </>
+                  ) : (
+                    <>
+                      {t.actions.getRecommendation}
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+                      </svg>
+                    </>
+                  )}
                 </button>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 {scenarioOptions.map((opt) => {
                   const isSelected = opt.id === selectedOption;
                   return (
@@ -594,14 +765,17 @@ export default function Home() {
                       ].join(" ")}
                       aria-pressed={isSelected}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-sm font-semibold text-zinc-900">{opt.title}</div>
-                          <div className="mt-1 text-sm text-zinc-600">{opt.description}</div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">{SCENARIO_EMOJI[opt.id]}</span>
+                            <div className="text-sm font-semibold text-zinc-900">{opt.title}</div>
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-500 leading-snug">{opt.description}</div>
                         </div>
                         <div
                           className={[
-                            "mt-0.5 h-5 w-5 rounded-full border transition",
+                            "mt-0.5 h-5 w-5 shrink-0 rounded-full border transition",
                             isSelected ? "border-sky-500 bg-sky-500" : "border-zinc-300 bg-white",
                           ].join(" ")}
                         />
@@ -644,11 +818,19 @@ export default function Home() {
               </div>
 
               {loading ? (
-                <div className="mt-4 animate-pulse space-y-3 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-5">
-                  <div className="h-4 w-2/3 rounded-lg bg-zinc-200" />
+                <div aria-label="Loading recommendation" className="mt-4 animate-pulse space-y-3 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-5">
+                  <div className="flex gap-2">
+                    <div className="h-6 w-6 rounded-full bg-zinc-200" />
+                    <div className="h-6 w-32 rounded-lg bg-zinc-200" />
+                  </div>
                   <div className="h-3 w-full rounded-lg bg-zinc-100" />
                   <div className="h-3 w-5/6 rounded-lg bg-zinc-100" />
                   <div className="h-3 w-4/5 rounded-lg bg-zinc-100" />
+                  <div className="mt-4 grid grid-cols-4 gap-2">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="h-14 rounded-lg bg-zinc-100" />
+                    ))}
+                  </div>
                 </div>
               ) : !result && !apiError ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5">
@@ -696,11 +878,11 @@ export default function Home() {
                         <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={[
-                              "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold",
+                              "inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-bold shadow-sm",
                               badgeClasses,
                             ].join(" ")}
                           >
-                            {verdictLabel}
+                            {SCENARIO_EMOJI[result.selectedOption]} {verdictLabel}
                           </span>
                           <span
                             className={[
@@ -725,13 +907,25 @@ export default function Home() {
 
                   <div className="mt-5 rounded-lg bg-zinc-50 p-3 sm:p-4">
                     <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-600">{t.result.weather}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-3xl leading-none">
+                          {getWeatherEmoji(result.weather.temperature, result.weather.rainChance, result.weather.wind, result.weather.weatherCode)}
+                        </span>
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-600">{t.result.weather}</div>
+                          <div className="text-xs text-zinc-500">{result.conditionLabel}</div>
+                        </div>
+                      </div>
                       <div className="text-xs font-medium text-zinc-500">{t.result.basedOnSelectedTime}</div>
                     </div>
-                    <div className="mt-2 grid gap-2 text-sm text-zinc-700 sm:grid-cols-3">
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-zinc-500">{t.result.temp}</div>
                         <div className="mt-0.5 text-sm font-semibold text-zinc-900">{result.weather.temperature}°C</div>
+                      </div>
+                      <div className="rounded-lg bg-white p-3">
+                        <div className="text-[11px] text-zinc-500">{t.result.feelsLike}</div>
+                        <div className="mt-0.5 text-sm font-semibold text-zinc-900">{result.weather.feelsLike}°C</div>
                       </div>
                       <div className="rounded-lg bg-white p-3">
                         <div className="text-[11px] text-zinc-500">{t.result.rain}</div>
@@ -746,23 +940,66 @@ export default function Home() {
 
                   <div className="mt-5 border-t border-zinc-200 pt-4">
                     <div className="text-sm font-medium text-zinc-900">{t.feedback.question}</div>
-                    {feedback ? (
+                    {feedback === "yes" || feedbackReason ? (
                       <div className="mt-2 text-sm text-zinc-600">{t.feedback.thanks}</div>
+                    ) : feedback === "no" ? (
+                      <div className="mt-3">
+                        <div className="text-xs font-medium text-zinc-600 mb-2">{t.feedback.whyNot}</div>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { key: "wrongForecast", label: t.feedback.reasonWrongForecast },
+                            { key: "notHelpful", label: t.feedback.reasonNotHelpful },
+                            { key: "missingScenario", label: t.feedback.reasonMissingScenario },
+                          ].map(({ key, label }) => (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => {
+                                setFeedbackReason(key);
+                                track("feedback_negative", {
+                                  reason: key,
+                                  option: result.selectedOption,
+                                  city: result.resolvedCity ?? result.city,
+                                });
+                              }}
+                              className="inline-flex h-9 items-center justify-center rounded-full border border-zinc-200 bg-white px-4 text-xs font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ) : (
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => setFeedback("yes")}
-                          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 sm:w-auto"
+                          className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
                         >
                           {t.feedback.yes}
                         </button>
                         <button
                           type="button"
                           onClick={() => setFeedback("no")}
-                          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 sm:w-auto"
+                          className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
                         >
                           {t.feedback.no}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onShare(result)}
+                          className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+                        >
+                          {shareState === "copied" ? (
+                            t.feedback.copied
+                          ) : (
+                            <>
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                <path d="M13 4.5a2.5 2.5 0 11.702 1.737L6.97 9.604a2.518 2.518 0 010 .792l6.733 3.367a2.5 2.5 0 11-.671 1.341l-6.733-3.367a2.5 2.5 0 110-3.475l6.733-3.366A2.52 2.52 0 0113 4.5z" />
+                              </svg>
+                              {t.feedback.share}
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
