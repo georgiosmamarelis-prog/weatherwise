@@ -41,6 +41,14 @@ type FieldErrors = {
   timeOfDay?: string;
 };
 
+type CitySuggestion = {
+  name: string;
+  country: string;
+  admin1?: string;
+  latitude: number;
+  longitude: number;
+};
+
 const SCENARIO_EMOJI: Record<OptionId, string> = {
   running: "🏃",
   wear: "👕",
@@ -61,6 +69,8 @@ const translations = {
     inputs: {
       cityLabel: "City",
       cityPlaceholder: "e.g. Athens",
+      suggestionsLoading: "Searching…",
+      noSuggestions: "No cities found.",
       dateLabel: "Date",
       selectedDate: "Selected:",
       quickToday: "Today",
@@ -133,6 +143,8 @@ const translations = {
     inputs: {
       cityLabel: "Πόλη",
       cityPlaceholder: "π.χ. Αθήνα",
+      suggestionsLoading: "Αναζήτηση…",
+      noSuggestions: "Δεν βρέθηκαν πόλεις.",
       dateLabel: "Ημερομηνία",
       selectedDate: "Επιλεγμένη:",
       quickToday: "Σήμερα",
@@ -314,9 +326,16 @@ export default function Home() {
   const [feedbackReason, setFeedbackReason] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [slowLoading, setSlowLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const resultRef = useRef<HTMLElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestAbortRef = useRef<AbortController | null>(null);
+  const cityWrapperRef = useRef<HTMLDivElement | null>(null);
 
   const t = translations[language];
 
@@ -359,6 +378,48 @@ export default function Home() {
     const timer = setTimeout(() => setSlowLoading(true), 10000);
     return () => clearTimeout(timer);
   }, [loading]);
+
+  useEffect(() => {
+    if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+    if (city.trim().length < 2) {
+      setSuggestions([]);
+      setDropdownOpen(false);
+      setSuggestionsLoading(false);
+      return;
+    }
+    suggestDebounceRef.current = setTimeout(async () => {
+      suggestAbortRef.current?.abort();
+      const controller = new AbortController();
+      suggestAbortRef.current = controller;
+      setSuggestionsLoading(true);
+      try {
+        const res = await fetch(`/api/city-search?q=${encodeURIComponent(city.trim())}`, {
+          signal: controller.signal,
+        });
+        const data = (await res.json()) as CitySuggestion[];
+        setSuggestions(data);
+        setDropdownOpen(true);
+        setHighlightedIndex(-1);
+      } catch {
+        // aborted or network error — silently ignore
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+    };
+  }, [city]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (cityWrapperRef.current && !cityWrapperRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const scenarioOptions = useMemo(
     () =>
@@ -406,6 +467,14 @@ export default function Home() {
     requestAnimationFrame(() => {
       resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  }
+
+  function onSelectSuggestion(s: CitySuggestion) {
+    setCity(s.name);
+    setSuggestions([]);
+    setDropdownOpen(false);
+    setHighlightedIndex(-1);
+    if (fieldErrors.city) setFieldErrors((prev) => ({ ...prev, city: undefined }));
   }
 
   async function onShare(res: RecommendResponse) {
@@ -593,7 +662,7 @@ export default function Home() {
                   <label className="block text-sm font-medium text-zinc-800" htmlFor="city">
                     {t.inputs.cityLabel}
                   </label>
-                  <div className="mt-2">
+                  <div className="relative mt-2" ref={cityWrapperRef}>
                     <input
                       id="city"
                       value={city}
@@ -601,13 +670,69 @@ export default function Home() {
                         setCity(e.target.value);
                         if (fieldErrors.city) setFieldErrors((prev) => ({ ...prev, city: undefined }));
                       }}
+                      onKeyDown={(e) => {
+                        if (!dropdownOpen || suggestions.length === 0) return;
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setHighlightedIndex((i) => Math.min(i + 1, suggestions.length - 1));
+                        } else if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setHighlightedIndex((i) => Math.max(i - 1, 0));
+                        } else if (e.key === "Enter" && highlightedIndex >= 0) {
+                          e.preventDefault();
+                          onSelectSuggestion(suggestions[highlightedIndex]);
+                        } else if (e.key === "Escape") {
+                          setDropdownOpen(false);
+                          setHighlightedIndex(-1);
+                        }
+                      }}
                       placeholder={t.inputs.cityPlaceholder}
-                      autoComplete="address-level2"
+                      autoComplete="off"
+                      aria-autocomplete="list"
+                      aria-expanded={dropdownOpen}
+                      aria-controls="city-suggestions"
+                      role="combobox"
                       className={[
                         "h-11 w-full rounded-xl border bg-white px-4 text-sm text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-sky-300 focus:ring-4 focus:ring-sky-100",
                         fieldErrors.city ? "border-rose-300" : "border-zinc-200",
                       ].join(" ")}
                     />
+                    {dropdownOpen && (
+                      <ul
+                        id="city-suggestions"
+                        role="listbox"
+                        className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg"
+                      >
+                        {suggestionsLoading ? (
+                          <li className="px-4 py-3 text-sm text-zinc-500">{t.inputs.suggestionsLoading}</li>
+                        ) : suggestions.length === 0 ? (
+                          <li className="px-4 py-3 text-sm text-zinc-500">{t.inputs.noSuggestions}</li>
+                        ) : (
+                          suggestions.map((s, i) => (
+                            <li
+                              key={`${s.latitude},${s.longitude}`}
+                              role="option"
+                              aria-selected={i === highlightedIndex}
+                              onMouseEnter={() => setHighlightedIndex(i)}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                onSelectSuggestion(s);
+                              }}
+                              className={[
+                                "flex cursor-pointer flex-col px-4 py-2.5 text-sm transition-colors",
+                                i === highlightedIndex ? "bg-sky-50 text-sky-900" : "text-zinc-800 hover:bg-zinc-50",
+                              ].join(" ")}
+                            >
+                              <span className="font-medium">
+                                {s.name}
+                                {s.admin1 ? `, ${s.admin1}` : ""}
+                              </span>
+                              <span className="text-xs text-zinc-500">{s.country}</span>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    )}
                   </div>
                   {fieldErrors.city ? <div className="mt-2 text-xs text-rose-700">{fieldErrors.city}</div> : null}
                 </div>
