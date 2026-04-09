@@ -1,5 +1,6 @@
 "use client";
 
+import { track } from "@vercel/analytics";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type OptionId = "running" | "wear" | "motorbike" | "walk";
@@ -190,11 +191,6 @@ function getTomorrowYyyyMmDd() {
   return formatDateForInput(d);
 }
 
-function timeOfDayLabel(t: TimeOfDay) {
-  // Deprecated: kept for minimal change surface (replaced by translations).
-  return t;
-}
-
 type VerdictKind = "good" | "okay" | "not";
 
 function getVerdictAndRisk(option: OptionId, weather: Weather) {
@@ -255,8 +251,10 @@ export default function Home() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<"yes" | "no" | null>(null);
+  const [slowLoading, setSlowLoading] = useState(false);
 
   const resultRef = useRef<HTMLElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const t = translations[language];
 
@@ -276,6 +274,15 @@ export default function Home() {
       // ignore
     }
   }, [language]);
+
+  useEffect(() => {
+    if (!loading) {
+      setSlowLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlowLoading(true), 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const scenarioOptions = useMemo(
     () =>
@@ -324,6 +331,10 @@ export default function Home() {
       return;
     }
 
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setResult(null);
     setFeedback(null);
@@ -340,6 +351,7 @@ export default function Home() {
           selectedDate: selectedDate.trim(),
           selectedTimeOfDay: timeOfDay,
         }),
+        signal: controller.signal,
       });
 
       const data = (await res.json()) as unknown;
@@ -356,9 +368,11 @@ export default function Home() {
       }
 
       setResult(data as RecommendResponse);
+      track("recommendation_generated", { option, timeOfDay });
       setLoading(false);
       scrollToResultSoon();
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       setApiError(t.errors.network);
       setLoading(false);
       scrollToResultSoon();
@@ -376,14 +390,14 @@ export default function Home() {
         <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6 sm:py-20">
           <header className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-white shadow-sm">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-white shadow-sm" role="img" aria-label="WeatherWise logo">
                 <span className="text-sm font-semibold">WW</span>
               </div>
               <span className="text-sm font-semibold tracking-tight">{t.header.brand}</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="hidden text-sm text-zinc-500 sm:block">{t.header.tagline}</div>
-              <div className="inline-flex rounded-full border border-zinc-200 bg-white/70 p-1 shadow-sm backdrop-blur">
+              <div role="group" aria-label="Language selection" className="inline-flex rounded-full border border-zinc-200 bg-white/70 p-1 shadow-sm backdrop-blur">
                 <button
                   type="button"
                   onClick={() => setLanguage("en")}
@@ -392,6 +406,7 @@ export default function Home() {
                     language === "en" ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-zinc-100",
                   ].join(" ")}
                   aria-pressed={language === "en"}
+                  aria-label="English"
                 >
                   {t.header.langEN}
                 </button>
@@ -403,6 +418,7 @@ export default function Home() {
                     language === "el" ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-zinc-100",
                   ].join(" ")}
                   aria-pressed={language === "el"}
+                  aria-label="Ελληνικά"
                 >
                   {t.header.langEL}
                 </button>
@@ -616,13 +632,25 @@ export default function Home() {
                     ) : null}
                     {!result && !apiError && !loading ? "." : null}
                   </p>
+                  {slowLoading && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      {language === "el" ? "Λίγο ακόμα…" : "Still loading, hang tight…"}
+                    </p>
+                  )}
                 </div>
                 <div className="text-xs font-medium text-zinc-500">
                   {city.trim() ? city.trim() : t.inputs.cityLabel} · {selectedLabel || t.validation.option}
                 </div>
               </div>
 
-              {!result && !apiError ? (
+              {loading ? (
+                <div className="mt-4 animate-pulse space-y-3 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-5">
+                  <div className="h-4 w-2/3 rounded-lg bg-zinc-200" />
+                  <div className="h-3 w-full rounded-lg bg-zinc-100" />
+                  <div className="h-3 w-5/6 rounded-lg bg-zinc-100" />
+                  <div className="h-3 w-4/5 rounded-lg bg-zinc-100" />
+                </div>
+              ) : !result && !apiError ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5">
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 h-7 w-7 rounded-full border border-zinc-200 bg-white text-center text-sm font-semibold text-zinc-500">

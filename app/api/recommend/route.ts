@@ -26,6 +26,25 @@ type RecommendResponse = {
   weather: Weather;
 };
 
+type GeocodeResponse = {
+  results?: Array<{
+    name?: string;
+    latitude?: number;
+    longitude?: number;
+    admin1?: string;
+    country?: string;
+  }>;
+};
+
+type ForecastResponse = {
+  hourly?: {
+    time?: string[];
+    temperature_2m?: number[];
+    precipitation_probability?: number[];
+    windspeed_10m?: number[];
+  };
+};
+
 function timeOfDayToTargetHour(timeOfDay: TimeOfDay) {
   if (timeOfDay === "morning") return 8;
   if (timeOfDay === "noon") return 12;
@@ -190,10 +209,12 @@ function buildRecommendation(option: OptionId, weather: Weather, language: Langu
 
 async function geocodeCity(city: string) {
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
-  const res = await fetch(url, { cache: "no-store" });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const res = await fetch(url, { cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timeoutId));
   if (!res.ok) throw new Error("geocoding_failed");
 
-  const data = (await res.json()) as any;
+  const data = (await res.json()) as GeocodeResponse;
   const first = Array.isArray(data?.results) ? data.results[0] : null;
   if (!first) return null;
 
@@ -211,13 +232,16 @@ async function fetchHourlyForecast(lat: number, lon: number) {
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(String(lat))}` +
     `&longitude=${encodeURIComponent(String(lon))}` +
-    `&hourly=temperature_2m,precipitation_probability,windspeed_10m&timezone=auto`;
-  const res = await fetch(url, { cache: "no-store" });
+    `&hourly=temperature_2m,precipitation_probability,windspeed_10m&windspeed_unit=kmh&timezone=auto`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const res = await fetch(url, { cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timeoutId));
   if (!res.ok) throw new Error("forecast_failed");
-  return (await res.json()) as any;
+  return (await res.json()) as ForecastResponse;
 }
 
 export async function POST(req: Request) {
+  let language: Language = "en";
   try {
     const body = (await req.json()) as {
       language?: Language;
@@ -227,7 +251,7 @@ export async function POST(req: Request) {
       selectedTimeOfDay?: TimeOfDay;
     };
 
-    const language: Language = body.language === "en" ? "en" : "el";
+    language = body.language === "en" ? "en" : "el";
     const city = (body.city ?? "").trim();
     const selectedOption = body.selectedOption;
     const selectedDate = (body.selectedDate ?? "").trim();
@@ -235,11 +259,19 @@ export async function POST(req: Request) {
 
     if (!city)
       return NextResponse.json({ error: language === "el" ? "Γράψε μια πόλη." : "Please enter a city." }, { status: 400 });
+    if (city.length > 100)
+      return NextResponse.json({ error: language === "el" ? "Το όνομα της πόλης είναι πολύ μεγάλο." : "City name is too long." }, { status: 400 });
     if (!selectedOption)
       return NextResponse.json({ error: language === "el" ? "Διάλεξε μια επιλογή." : "Please select an option." }, { status: 400 });
     if (!selectedDate || !isValidYyyyMmDd(selectedDate))
       return NextResponse.json(
         { error: language === "el" ? "Διάλεξε ημερομηνία." : "Please select a date." },
+        { status: 400 },
+      );
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (selectedDate < todayStr)
+      return NextResponse.json(
+        { error: language === "el" ? "Διάλεξε σημερινή ή μελλοντική ημερομηνία." : "Please select today or a future date." },
         { status: 400 },
       );
     if (!selectedTimeOfDay)
@@ -264,10 +296,10 @@ export async function POST(req: Request) {
     const forecast = await fetchHourlyForecast(geo.latitude, geo.longitude);
 
     const hourly = forecast?.hourly;
-    const times: string[] = hourly?.time;
-    const temps: number[] = hourly?.temperature_2m;
-    const rains: number[] = hourly?.precipitation_probability;
-    const winds: number[] = hourly?.windspeed_10m;
+    const times: string[] | undefined = hourly?.time;
+    const temps: number[] | undefined = hourly?.temperature_2m;
+    const rains: number[] | undefined = hourly?.precipitation_probability;
+    const winds: number[] | undefined = hourly?.windspeed_10m;
 
     if (!Array.isArray(times) || !Array.isArray(temps) || !Array.isArray(rains) || !Array.isArray(winds)) {
       return NextResponse.json(
@@ -319,7 +351,9 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "Something went wrong while talking to the weather service. Please try again in a moment or adjust your inputs.",
+          language === "el"
+            ? "Κάτι πήγε στραβά. Δοκίμασε ξανά σε λίγο."
+            : "Something went wrong. Please try again in a moment.",
       },
       { status: 500 },
     );
