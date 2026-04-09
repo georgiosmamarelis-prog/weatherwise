@@ -336,6 +336,7 @@ export default function Home() {
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestAbortRef = useRef<AbortController | null>(null);
   const cityWrapperRef = useRef<HTMLDivElement | null>(null);
+  const skipNextSuggestRef = useRef(false);
 
   const t = translations[language];
 
@@ -381,6 +382,10 @@ export default function Home() {
 
   useEffect(() => {
     if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+    if (skipNextSuggestRef.current) {
+      skipNextSuggestRef.current = false;
+      return;
+    }
     if (city.trim().length < 2) {
       setSuggestions([]);
       setDropdownOpen(false);
@@ -393,9 +398,10 @@ export default function Home() {
       suggestAbortRef.current = controller;
       setSuggestionsLoading(true);
       try {
-        const res = await fetch(`/api/city-search?q=${encodeURIComponent(city.trim())}`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/city-search?q=${encodeURIComponent(city.trim())}&lang=${language}`,
+          { signal: controller.signal },
+        );
         const data = (await res.json()) as CitySuggestion[];
         setSuggestions(data);
         setDropdownOpen(true);
@@ -409,7 +415,7 @@ export default function Home() {
     return () => {
       if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
     };
-  }, [city]);
+  }, [city, language]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -470,6 +476,7 @@ export default function Home() {
   }
 
   function onSelectSuggestion(s: CitySuggestion) {
+    skipNextSuggestRef.current = true;
     setCity(s.name);
     setSuggestions([]);
     setDropdownOpen(false);
