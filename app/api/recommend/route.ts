@@ -398,6 +398,9 @@ export async function POST(req: Request) {
       selectedOption?: OptionId;
       selectedDate?: string;
       selectedTimeOfDay?: TimeOfDay;
+      latitude?: number;
+      longitude?: number;
+      resolvedCity?: string;
     };
 
     language = body.language === "en" ? "en" : "el";
@@ -436,17 +439,30 @@ export async function POST(req: Request) {
         { status: 400 },
       );
 
-    const geo = await geocodeCity(city);
-    if (!geo) {
-      return NextResponse.json(
-        {
-          error:
-            language === "el"
-              ? `Δεν βρήκαμε την πόλη "${city}". Δοκίμασε μια κοντινή πόλη ή έλεγξε την ορθογραφία.`
-              : `We couldn't find "${city}". Try a nearby city or double-check the spelling.`,
-        },
-        { status: 404 },
-      );
+    const providedLat = typeof body.latitude === "number" && !Number.isNaN(body.latitude) ? body.latitude : null;
+    const providedLon = typeof body.longitude === "number" && !Number.isNaN(body.longitude) ? body.longitude : null;
+
+    let geo: { latitude: number; longitude: number; resolvedName: string } | null = null;
+
+    if (providedLat !== null && providedLon !== null) {
+      geo = {
+        latitude: providedLat,
+        longitude: providedLon,
+        resolvedName: typeof body.resolvedCity === "string" && body.resolvedCity ? body.resolvedCity : city,
+      };
+    } else {
+      geo = await geocodeCity(city);
+      if (!geo) {
+        return NextResponse.json(
+          {
+            error:
+              language === "el"
+                ? `Δεν βρήκαμε την πόλη "${city}". Δοκίμασε μια κοντινή πόλη ή έλεγξε την ορθογραφία.`
+                : `We couldn't find "${city}". Try a nearby city or double-check the spelling.`,
+          },
+          { status: 404 },
+        );
+      }
     }
 
     const forecast = await fetchHourlyForecast(geo.latitude, geo.longitude);

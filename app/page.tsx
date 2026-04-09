@@ -330,6 +330,7 @@ export default function Home() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [selectedCitySuggestion, setSelectedCitySuggestion] = useState<CitySuggestion | null>(null);
 
   const resultRef = useRef<HTMLElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -477,6 +478,7 @@ export default function Home() {
 
   function onSelectSuggestion(s: CitySuggestion) {
     skipNextSuggestRef.current = true;
+    setSelectedCitySuggestion(s);
     setCity(s.name);
     setSuggestions([]);
     setDropdownOpen(false);
@@ -545,6 +547,19 @@ export default function Home() {
           selectedOption: option,
           selectedDate: selectedDate.trim(),
           selectedTimeOfDay: timeOfDay,
+          ...(selectedCitySuggestion
+            ? {
+                latitude: selectedCitySuggestion.latitude,
+                longitude: selectedCitySuggestion.longitude,
+                resolvedCity: [
+                  selectedCitySuggestion.name,
+                  selectedCitySuggestion.admin1,
+                  selectedCitySuggestion.country,
+                ]
+                  .filter(Boolean)
+                  .join(", "),
+              }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -649,6 +664,7 @@ export default function Home() {
                     key={ex.label}
                     type="button"
                     onClick={() => {
+                      setSelectedCitySuggestion(null);
                       setCity(ex.city);
                       setSelectedOption(ex.option);
                       setSelectedDate(getTodayYyyyMmDd());
@@ -675,6 +691,7 @@ export default function Home() {
                       value={city}
                       onChange={(e) => {
                         setCity(e.target.value);
+                        setSelectedCitySuggestion(null);
                         if (fieldErrors.city) setFieldErrors((prev) => ({ ...prev, city: undefined }));
                       }}
                       onKeyDown={(e) => {
