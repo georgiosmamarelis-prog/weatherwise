@@ -211,9 +211,10 @@ function getTomorrowYyyyMmDd() {
   return formatDateForInput(d);
 }
 
+// Open-Meteo covers 16 forecast days, i.e. today plus the next 15.
 function getMaxDateYyyyMmDd() {
   const d = new Date();
-  d.setDate(d.getDate() + 16);
+  d.setDate(d.getDate() + 15);
   return formatDateForInput(d);
 }
 

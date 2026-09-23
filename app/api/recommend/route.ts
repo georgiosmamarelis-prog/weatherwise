@@ -12,6 +12,15 @@ import {
   type Weather,
 } from "@/app/lib/recommendation.mts";
 
+import {
+  buildForecastUrl,
+  isDateOutsideCoverage,
+  isPlausibleForecastDate,
+  readHourlyValue,
+  utcDayYyyyMmDd,
+  type HourlySeries,
+} from "./forecast.mts";
+
 type GeocodeResponse = {
   results?: Array<{
     name?: string;
@@ -22,19 +31,31 @@ type GeocodeResponse = {
   }>;
 };
 
+// Every hourly series can contain `null` for hours Open-Meteo cannot model.
 type ForecastResponse = {
   hourly?: {
     time?: string[];
-    temperature_2m?: number[];
-    apparent_temperature?: number[];
-    precipitation_probability?: number[];
-    windspeed_10m?: number[];
-    weathercode?: number[];
-    uv_index?: number[];
-    visibility?: number[];
+    temperature_2m?: HourlySeries;
+    apparent_temperature?: HourlySeries;
+    precipitation_probability?: HourlySeries;
+    windspeed_10m?: HourlySeries;
+    weathercode?: HourlySeries;
+    uv_index?: HourlySeries;
+    visibility?: HourlySeries;
   };
 };
 
+function dateOutOfRangeResponse(language: Language) {
+  return NextResponse.json(
+    {
+      error:
+        language === "el"
+          ? "Έχουμε πρόγνωση μόνο για τις επόμενες 16 ημέρες."
+          : "Forecasts are only available up to 16 days ahead.",
+    },
+    { status: 400 },
+  );
+}
 async function geocodeCity(city: string) {
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
   const controller = new AbortController();
@@ -57,11 +78,7 @@ async function geocodeCity(city: string) {
 }
 
 async function fetchHourlyForecast(lat: number, lon: number) {
-  const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(String(lat))}` +
-    `&longitude=${encodeURIComponent(String(lon))}` +
-    `&hourly=temperature_2m,apparent_temperature,precipitation_probability,windspeed_10m,weathercode,uv_index,visibility` +
-    `&temperature_unit=celsius&windspeed_unit=kmh&timezone=auto`;
+  const url = buildForecastUrl(lat, lon);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
   const res = await fetch(url, { cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timeoutId));
@@ -100,19 +117,17 @@ export async function POST(req: Request) {
         { error: language === "el" ? "Διάλεξε ημερομηνία." : "Please select a date." },
         { status: 400 },
       );
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (selectedDate < todayStr)
-      return NextResponse.json(
-        { error: language === "el" ? "Διάλεξε σημερινή ή μελλοντική ημερομηνία." : "Please select today or a future date." },
-        { status: 400 },
-      );
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + 16);
-    if (selectedDate > maxDate.toISOString().slice(0, 10))
-      return NextResponse.json(
-        { error: language === "el" ? "Έχουμε πρόγνωση μόνο για τις επόμενες 16 ημέρες." : "Forecasts are only available up to 16 days ahead." },
-        { status: 400 },
-      );
+    // Pre-flight guard only. It carries a day of timezone slack, so it rejects
+    // just the dates that cannot be valid in any timezone; the exact window is
+    // settled after the fetch against the timestamps the API returned.
+    if (!isPlausibleForecastDate(selectedDate)) {
+      if (selectedDate < utcDayYyyyMmDd(0))
+        return NextResponse.json(
+          { error: language === "el" ? "Διάλεξε σημερινή ή μελλοντική ημερομηνία." : "Please select today or a future date." },
+          { status: 400 },
+        );
+      return dateOutOfRangeResponse(language);
+    }
     if (!selectedTimeOfDay)
       return NextResponse.json(
         { error: language === "el" ? "Διάλεξε ώρα ημέρας." : "Please select time of day." },
@@ -149,13 +164,13 @@ export async function POST(req: Request) {
 
     const hourly = forecast?.hourly;
     const times: string[] | undefined = hourly?.time;
-    const temps: number[] | undefined = hourly?.temperature_2m;
-    const feelsLikeArr: number[] | undefined = hourly?.apparent_temperature;
-    const rains: number[] | undefined = hourly?.precipitation_probability;
-    const winds: number[] | undefined = hourly?.windspeed_10m;
-    const weatherCodes: number[] | undefined = hourly?.weathercode;
-    const uvs: number[] | undefined = hourly?.uv_index;
-    const vises: number[] | undefined = hourly?.visibility;
+    const temps: HourlySeries = hourly?.temperature_2m;
+    const feelsLikeArr: HourlySeries = hourly?.apparent_temperature;
+    const rains: HourlySeries = hourly?.precipitation_probability;
+    const winds: HourlySeries = hourly?.windspeed_10m;
+    const weatherCodes: HourlySeries = hourly?.weathercode;
+    const uvs: HourlySeries = hourly?.uv_index;
+    const vises: HourlySeries = hourly?.visibility;
 
     if (!Array.isArray(times) || !Array.isArray(temps) || !Array.isArray(rains) || !Array.isArray(winds)) {
       return NextResponse.json(
@@ -167,36 +182,53 @@ export async function POST(req: Request) {
     const targetHour = timeOfDayToTargetHour(selectedTimeOfDay);
     const idx = selectClosestHourIndexOnDate(times, selectedDate, targetHour);
     if (idx < 0) {
+      // The returned timestamps are the authoritative coverage window, so a
+      // date beyond them gets the precise out-of-range message rather than a
+      // generic lookup failure.
+      if (isDateOutsideCoverage(times, selectedDate)) return dateOutOfRangeResponse(language);
       return NextResponse.json(
         { error: language === "el" ? "Δεν βρέθηκε ωριαία πρόγνωση για την επιλεγμένη ημερομηνία." : "No hourly forecast was available for the selected date." },
         { status: 404 },
       );
     }
 
-    const temperature = Number(temps[idx]);
-    const rainChance = Number(rains[idx]);
-    const wind = Number(winds[idx]);
+    // Every safety-relevant field is read through readHourlyValue, which
+    // rejects gaps *before* numeric coercion. Coercing first would turn a
+    // `null` hour into 0 °C / 0 % rain / 0 km/h / clear sky / 10 km visibility
+    // and produce a confidently wrong recommendation instead of an error.
+    const temperature = readHourlyValue(temps, idx);
+    const feelsLike = readHourlyValue(feelsLikeArr, idx);
+    const rainChance = readHourlyValue(rains, idx);
+    const wind = readHourlyValue(winds, idx);
+    const weatherCode = readHourlyValue(weatherCodes, idx);
+    const visibility = readHourlyValue(vises, idx);
 
-    if ([temperature, rainChance, wind].some((n) => Number.isNaN(n))) {
+    if (
+      temperature === null ||
+      feelsLike === null ||
+      rainChance === null ||
+      wind === null ||
+      weatherCode === null ||
+      visibility === null
+    ) {
       return NextResponse.json(
         { error: language === "el" ? "Η πρόγνωση είναι ελλιπής για την επιλεγμένη ώρα." : "Forecast data was incomplete for the selected time." },
         { status: 502 },
       );
     }
 
-    const feelsLike = feelsLikeArr ? Math.round(Number(feelsLikeArr[idx])) : Math.round(temperature);
-    const weatherCode = weatherCodes ? Math.round(Number(weatherCodes[idx])) || 0 : 0;
-    const uvIndex = uvs ? Math.round(Number(uvs[idx])) || 0 : 0;
-    const visibility = vises ? Math.round(Number(vises[idx])) || 10000 : 10000;
+    // UV only drives advisory copy, and a real 0 (night, deep winter) already
+    // means "nothing to say", so a gap degrades to 0 rather than failing.
+    const uvIndex = readHourlyValue(uvs, idx) ?? 0;
 
     const weather: Weather = {
       temperature: Math.round(temperature),
-      feelsLike: Number.isNaN(feelsLike) ? Math.round(temperature) : feelsLike,
+      feelsLike: Math.round(feelsLike),
       rainChance: Math.round(rainChance),
       wind: Math.round(wind),
-      weatherCode: Number.isNaN(weatherCode) ? 0 : weatherCode,
-      uvIndex: Number.isNaN(uvIndex) ? 0 : uvIndex,
-      visibility: Number.isNaN(visibility) ? 10000 : visibility,
+      weatherCode: Math.round(weatherCode),
+      uvIndex: Math.round(uvIndex),
+      visibility: Math.round(visibility),
     };
 
     const conditionLabel = weatherCodeToLabel(weather.weatherCode, language);
